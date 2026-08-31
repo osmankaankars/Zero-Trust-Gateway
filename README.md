@@ -1,86 +1,81 @@
-# Zero Trust Gateway 🛡️
+# Zero Trust Gateway
 
-> **A high-performance, asynchronous Identity-Aware Proxy (IAP) implementing Zero Trust architecture principles for securing legacy infrastructure.**
+> An asynchronous Python proof of concept that puts simple JWT, source-IP, and role checks in front of a local HTTP service.
 
-![Python](https://img.shields.io/badge/Python-AsyncIO-blue)
-![Architecture](https://img.shields.io/badge/Architecture-Zero_Trust-red)
-![Compliance](https://img.shields.io/badge/Compliance-NIS2-orange)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Architecture](https://img.shields.io/badge/Pattern-Policy_Enforcement_Point-red)
+![CI](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/ci.yml/badge.svg)
 
----
+## What it demonstrates
 
-## 📖 Executive Summary
-Legacy applications (such as ERP systems and corporate intranet portals) often lack modern authentication and contextual access control mechanisms.
+For each direct request, the gateway:
 
-**Zero Trust Gateway** introduces a micro-perimeter in front of these legacy workloads, enforcing strict **Identity**, **Device**, and **Context-based** authorization before any request reaches the backend service.
+1. Reads an `HS256` bearer token and validates its signature and expiry.
+2. Builds a small security context from the direct peer IP and token claims.
+3. Requires a loopback source (`127.0.0.1` or `::1`) and the `admin` role.
+4. Removes caller credentials and hop-by-hop headers before proxying an allowed request to `http://127.0.0.1:8080` with `aiohttp`.
 
-This implementation follows **NIST SP 800-207 Zero Trust Architecture** guidelines, leveraging Python’s asynchronous networking capabilities (`aiohttp`) for high throughput and minimal latency.
+`idp_simulator.py` generates short-lived tokens for local testing. It is a token generator, not an identity provider.
 
----
-
-## 🏗️ Technical Architecture
-
-### 🔁 Reverse Proxy Engine  
-Built on **aiohttp**, enabling non-blocking I/O and support for thousands of concurrent inbound connections.
-
-### 🔐 Stateless Authentication  
-All requests must include a **JSON Web Token (JWT)** signed by a trusted Identity Provider.  
-Claims evaluated include:
-- `sub` (User ID)  
-- `roles` (RBAC mapping)  
-- `exp` (Token expiry)  
-- `ip` (Optional: last known IP binding)
-
-### ⚖️ Policy Enforcement Point (PEP)
-Each request is validated against:
-- **IP Whitelisting Policies**
-- **Role-Based Access Control (RBAC)**
-- **Time-based or Context-based Policies** (optional future extension)
-
-If the request fails any check, the gateway **denies access** before touching the upstream service.
-
-### 🛡️ Upstream Protection  
-The real application endpoint (e.g., SAP, Oracle ERP, legacy web servers) is completely hidden from the public internet.
-
----
-
-## ⚙️ Installation
+## Install
 
 ```bash
 git clone https://github.com/osmankaankars/Zero-Trust-Gateway.git
 cd Zero-Trust-Gateway
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
----
+## Local workflow
 
-## 🚀 Usage Workflow
+Choose a shared secret and export the same value in every shell that runs the gateway or simulator:
 
-### 1️⃣ Start the Gateway  
-The gateway listens on **Port 9000** and proxies traffic to `http://localhost:8080` (configurable in config.json).
+```bash
+export ZERO_TRUST_JWT_SECRET="replace-with-a-long-random-local-secret"
+```
+
+Start an upstream service on `127.0.0.1:8080`, then start the gateway. The
+demonstration listener is bound to `127.0.0.1:9000` by default:
 
 ```bash
 python gateway.py
 ```
 
-### 2️⃣ Generate Identity Token  
-Use the included lightweight IDP simulator to generate signed JWTs.
+In a second shell with the same environment variable, generate a token:
 
 ```bash
-python idp_simulator.py --role admin
+python idp_simulator.py --user lab-admin --role admin
 ```
 
-### 3️⃣ Access Protected Resource  
-Use the token to reach the upstream system:
+Use the printed token from the same workstation:
 
 ```bash
 curl -H "Authorization: Bearer <TOKEN>" http://localhost:9000/
 ```
 
-If the token is valid and the policy allows access, the request is proxied upstream.  
-Otherwise, the gateway returns a **403 Access Denied** response.
+The source constants in `gateway.py` define the upstream URL, gateway port, loopback allowlist, required role, and algorithm. The repository includes an explicit local-demo secret only as a convenience; set `ZERO_TRUST_JWT_SECRET` before any shared use.
 
----
+## Tests
 
-## 👨‍💻 Author  
-**Osman Kaan Kars**  
-Cybersecurity Engineer | Systems Architect
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite covers allow/deny policy decisions, missing or invalid required claims, token compatibility with the simulator, environment-based secret configuration, request/response header filtering, repeated response headers, and compressed upstream bodies. GitHub Actions runs the same checks on Python 3.11.
+
+## Security and architecture limits
+
+This is a learning PoC, not a production identity-aware proxy and not evidence of NIST SP 800-207, NIS2, or other regulatory compliance.
+
+- The implementation has no real identity lifecycle, issuer/audience validation, JWKS rotation, device posture, mTLS, or phishing-resistant authentication.
+- Anyone with the shared secret can use the simulator to mint an `admin` token. Keep the demo isolated and never reuse the secret.
+- The peer-IP check is intentionally local-only and is not proxy-aware. It does not safely process forwarded-client-IP headers.
+- The gateway does not add TLS, rate limiting, audit durability, an application-aware header policy, WebSocket support, or streaming guarantees; request and response bodies are buffered in memory.
+- A new upstream client session is created per request; no performance benchmark or concurrency capacity is claimed.
+- Running this process does not hide the upstream service. Enforce that separately with host and network controls.
+- Review request/response header behavior and failure handling before adapting the code to any real system.
+
+## Author
+
+Osman Kaan Kars — Senior Cybersecurity Engineer at SchutzOn
