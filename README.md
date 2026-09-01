@@ -2,7 +2,7 @@
 
 > An asynchronous Python proof of concept that puts simple JWT, source-IP, and role checks in front of a local HTTP service.
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![Architecture](https://img.shields.io/badge/Pattern-Policy_Enforcement_Point-red)
 ![CI](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/ci.yml/badge.svg)
 
@@ -72,10 +72,7 @@ This is a learning PoC, not a production identity-aware proxy and not evidence o
 - Anyone with the shared secret can use the simulator to mint an `admin` token. Keep the demo isolated and never reuse the secret.
 - The peer-IP check is intentionally local-only and is not proxy-aware. It does not safely process forwarded-client-IP headers.
 - The gateway does not add TLS, rate limiting, audit durability, an application-aware header policy, WebSocket support, or streaming guarantees; request and response bodies are buffered in memory.
+- Upstream requests have no explicit timeout. A stalled upstream can therefore hold a gateway request until the underlying client or network fails.
 - A new upstream client session is created per request; no performance benchmark or concurrency capacity is claimed.
 - Running this process does not hide the upstream service. Enforce that separately with host and network controls.
 - Review request/response header behavior and failure handling before adapting the code to any real system.
-
-## Author
-
-Osman Kaan Kars — Senior Cybersecurity Engineer at SchutzOn
