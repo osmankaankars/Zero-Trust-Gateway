@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zero-trust-gateway-lab"
+version = "0.2.0"
+description = "A local identity-aware reverse-proxy lab with strict JWT and policy enforcement"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "Osman Kaan Kars"}]
+keywords = ["zero-trust", "jwt", "reverse-proxy", "security-lab"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+]
+dependencies = [
+  "aiohttp>=3.14.3,<4",
+  "PyJWT[crypto]>=2.13.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build==1.6.0",
+  "mypy==2.3.1",
+  "ruff==0.16.5",
+]
+
+[project.scripts]
+zero-trust-gateway = "zero_trust_gateway.app:main"
+zero-trust-idp = "zero_trust_gateway.idp:main"
+
+[project.urls]
+Homepage = "https://github.com/osmankaankars/Zero-Trust-Gateway"
+Issues = "https://github.com/osmankaankars/Zero-Trust-Gateway/issues"
+Source = "https://github.com/osmankaankars/Zero-Trust-Gateway"
+
+[tool.setuptools]
+packages = ["zero_trust_gateway"]
+py-modules = ["gateway", "idp_simulator"]
+
+[tool.setuptools.package-data]
+zero_trust_gateway = ["py.typed"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["zero_trust_gateway", "gateway.py", "idp_simulator.py"]

@@ -1,78 +1,158 @@
 # Zero Trust Gateway
 
-> An asynchronous Python proof of concept that puts simple JWT, source-IP, and role checks in front of a local HTTP service.
+[![CI](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/codeql.yml)
+[![Python 3.11–3.14](https://img.shields.io/badge/python-3.11%E2%80%933.14-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-![Python](https://img.shields.io/badge/Python-3.11-blue)
-![Architecture](https://img.shields.io/badge/Pattern-Policy_Enforcement_Point-red)
-![CI](https://github.com/osmankaankars/Zero-Trust-Gateway/actions/workflows/ci.yml/badge.svg)
+A loopback-only identity-aware reverse-proxy lab for deterministic JWT,
+network, role, rate-limit, trusted-header, and upstream failure controls.
 
-## What it demonstrates
+Version **0.2.0** replaces the original shared-secret PoC with explicit local
+JWK Set configuration, `kid`-based rotation, strict issuer/audience validation,
+bounded request handling, and allow-listed structured audit events.
 
-For each direct request, the gateway:
+> [!IMPORTANT]
+> This is an independent educational project, not a production zero-trust
+> platform and not evidence of compliance with NIST SP 800-207, NIS2, DORA, or
+> another framework. Run it only with services and data you own or are
+> authorized to test.
 
-1. Reads an `HS256` bearer token and validates its signature and expiry.
-2. Builds a small security context from the direct peer IP and token claims.
-3. Requires a loopback source (`127.0.0.1` or `::1`) and the `admin` role.
-4. Removes caller credentials and hop-by-hop headers before proxying an allowed request to `http://127.0.0.1:8080` with `aiohttp`.
+## Security properties demonstrated
 
-`idp_simulator.py` generates short-lived tokens for local testing. It is a token generator, not an identity provider.
+- exact `iss` and `aud` matching with required `exp`, `iat`, `nbf`, `sub`, and
+  `role` claims;
+- explicit `HS256`/`RS256`/`ES256` allowlist and exact key-type/algorithm match;
+- local-only, bounded JWK Set parsing and known-`kid` selection for rotation;
+- direct-peer IP and role policy that ignores spoofable forwarded-IP headers;
+- bounded in-memory token-bucket rate limiting with `Retry-After`;
+- replacement of caller-supplied identity and request-ID headers;
+- removal of inbound `Cookie` and outbound `Set-Cookie` state so JWT-derived
+  identity cannot conflict with an upstream browser session;
+- upstream timeout, response-size bound, and redirect suppression;
+- JSON audit events whose schema cannot accept tokens, key material, request
+  bodies, headers, or query strings.
 
-## Install
+See [Architecture and trust boundaries](docs/ARCHITECTURE.md) for the complete
+contract and explicit non-goals.
+
+## Quick start
+
+Requires Python 3.11 or later. Create an isolated environment and install the
+project:
 
 ```bash
-git clone https://github.com/osmankaankars/Zero-Trust-Gateway.git
-cd Zero-Trust-Gateway
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-## Local workflow
-
-Choose a shared secret and export the same value in every shell that runs the gateway or simulator:
+Generate a fresh throwaway key set in a git-ignored local file. The simulator
+creates an owner-only file (`0600` on compatible POSIX filesystems), verifies
+that group/world access is absent, and refuses an existing path or symbolic
+link; this avoids overwriting a permissive file or following a redirected path.
+Remove the file when the exercise is complete:
 
 ```bash
-export ZERO_TRUST_JWT_SECRET="replace-with-a-long-random-local-secret"
+python idp_simulator.py --generate-keyset-file jwks.local.json
 ```
 
-Start an upstream service on `127.0.0.1:8080`, then start the gateway. The
-demonstration listener is bound to `127.0.0.1:9000` by default:
+In terminal A, start a local upstream service on port 8080:
 
 ```bash
+source .venv/bin/activate
+python -m http.server 8080 --bind 127.0.0.1 --directory docs
+```
+
+In terminal B, start the gateway on port 9000:
+
+```bash
+source .venv/bin/activate
+export ZERO_TRUST_JWKS_FILE="$PWD/jwks.local.json"
 python gateway.py
 ```
 
-In a second shell with the same environment variable, generate a token:
+In terminal C, use the same local key file to mint a short-lived token and make
+an authorized request:
 
 ```bash
-python idp_simulator.py --user lab-admin --role admin
+source .venv/bin/activate
+export ZERO_TRUST_JWKS_FILE="$PWD/jwks.local.json"
+TOKEN="$(python idp_simulator.py --user lab-admin --role admin)"
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | \
+  curl --fail-with-body --config - \
+  http://127.0.0.1:9000/
+unset TOKEN
 ```
 
-Use the printed token from the same workstation:
+Passing the header through curl's standard-input configuration keeps the token
+out of curl's process arguments. Do not run this example with shell tracing
+enabled. The simulator prints only the token. It is not an identity provider
+and anyone with the configured symmetric key can mint tokens; use it only
+inside the isolated lab.
+
+> [!NOTE]
+> Loopback does not prevent other local processes from bypassing the gateway and
+> reaching port 8080 directly. A real adaptation must independently isolate the
+> upstream service; see the documented trust boundary.
+
+## Rotation exercise
+
+A local JWK Set may contain multiple unique `kid` values. A safe lab rotation
+sequence is:
+
+1. Add the new verification key while keeping the previous key.
+2. Restart the gateway so it loads the updated JWK Set.
+3. Set `ZERO_TRUST_ACTIVE_KID` to the new key for the simulator.
+4. Verify new and unexpired old tokens during the bounded overlap window.
+5. Remove the retired key after its last token has expired, then restart the
+   gateway again.
+
+Unknown or retired `kid` values fail closed. Remote JWKS discovery is
+intentionally out of scope, so the request path never fetches key material.
+Key configuration is a startup snapshot; there is no hot reload.
+Keep the overlap no longer than `ZERO_TRUST_MAX_TOKEN_LIFETIME_SECONDS` plus the
+configured leeway.
+
+## Configuration
+
+Startup requires exactly one of `ZERO_TRUST_JWKS_JSON` or
+`ZERO_TRUST_JWKS_FILE`. The gateway otherwise refuses to start. Listener and
+upstream hosts must be loopback addresses.
+
+See the [configuration reference](docs/CONFIGURATION.md) for every setting,
+default, and accepted bound.
+
+## Development and verification
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:9000/
+python -m pip install -e '.[dev]'
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy
+python -W error::DeprecationWarning -m unittest discover -s tests -v
+python -m build
 ```
 
-The source constants in `gateway.py` define the upstream URL, gateway port, loopback allowlist, required role, and algorithm. The repository includes an explicit local-demo secret only as a convenience; set `ZERO_TRUST_JWT_SECRET` before any shared use.
+CI runs lint, formatting, strict type analysis, and the full suite on Ubuntu and
+macOS with Python 3.11–3.14. CodeQL and weekly dependency update checks cover
+the public repository.
 
-## Tests
+## Failure behavior
 
-```bash
-python -m unittest discover -s tests -v
-```
+Authentication failures return a generic `401`, authorization failures return
+`403`, oversized request bodies return `413`, encoded request bodies return
+`415`, limits return `429`, and sanitized upstream failures return `502`.
+Detailed reason codes are written only to the structured local audit stream.
+Responses use `Cache-Control: no-store` and carry a generated `X-Request-ID`.
 
-The suite covers allow/deny policy decisions, missing or invalid required claims, token compatibility with the simulator, environment-based secret configuration, request/response header filtering, repeated response headers, and compressed upstream bodies. GitHub Actions runs the same checks on Python 3.11.
+## Project documents
 
-## Security and architecture limits
+- [Architecture and trust boundaries](docs/ARCHITECTURE.md)
+- [Configuration reference](docs/CONFIGURATION.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [v0.2.0 release notes](release-notes/v0.2.0.md)
+- [MIT license](LICENSE)
 
-This is a learning PoC, not a production identity-aware proxy and not evidence of NIST SP 800-207, NIS2, or other regulatory compliance.
-
-- The implementation has no real identity lifecycle, issuer/audience validation, JWKS rotation, device posture, mTLS, or phishing-resistant authentication.
-- Anyone with the shared secret can use the simulator to mint an `admin` token. Keep the demo isolated and never reuse the secret.
-- The peer-IP check is intentionally local-only and is not proxy-aware. It does not safely process forwarded-client-IP headers.
-- The gateway does not add TLS, rate limiting, audit durability, an application-aware header policy, WebSocket support, or streaming guarantees; request and response bodies are buffered in memory.
-- Upstream requests have no explicit timeout. A stalled upstream can therefore hold a gateway request until the underlying client or network fails.
-- A new upstream client session is created per request; no performance benchmark or concurrency capacity is claimed.
-- Running this process does not hide the upstream service. Enforce that separately with host and network controls.
-- Review request/response header behavior and failure handling before adapting the code to any real system.
+Maintained by [Osman Kaan Kars](https://github.com/osmankaankars).

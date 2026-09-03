@@ -1,19 +1,15 @@
-# Python environments and caches
-venv/
-.venv/
 __pycache__/
 *.py[cod]
-.pytest_cache/
+*.egg-info/
 .coverage
-htmlcov/
-
-# Local configuration
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
 .env
-
-# Build and editor artifacts
 build/
 dist/
-*.egg-info/
-.DS_Store
-.idea/
-.vscode/
+htmlcov/
+*.pem
+*.key
+jwks.local.json

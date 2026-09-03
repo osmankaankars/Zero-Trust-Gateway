@@ -1,0 +1,4 @@
+-r requirements.txt
+build==1.6.0
+mypy==2.3.1
+ruff==0.16.5
